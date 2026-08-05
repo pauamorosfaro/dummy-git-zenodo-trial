@@ -17,7 +17,7 @@ This repository is a test of a combined GitHub and Zenodo Sandbox workflow.
 
 ## Current version
 
-Version 0.2.0 contains 16 data rows.
+Version 0.4.0 contains 18 data rows.
 
 ## Zenodo Sandbox
 
