@@ -21,6 +21,6 @@ Version 0.2.0 contains 16 data rows.
 
 ## Zenodo Sandbox
 
-Sandbox record DOI: ADD_YOUR_10.5072_DOI_HERE
+Sandbox record DOI: 10.5072/zenodo.581965
 
 This repository and its data are for testing only and have no scientific purpose.
