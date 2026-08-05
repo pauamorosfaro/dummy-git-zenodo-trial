@@ -1,27 +1,24 @@
-#!/usr/bin/env python3
-"""Publish selected repository files as a new version of an existing Zenodo record."""
-
 from __future__ import annotations
-
+ 
 import os
 import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
-
+ 
 import requests
-
+ 
 API_BASE = "https://sandbox.zenodo.org/api"
 TIMEOUT = 60
-
-
+ 
+ 
 def require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
         raise RuntimeError(f"Required environment variable {name} is missing.")
     return value
-
-
+ 
+ 
 def check(response: requests.Response, action: str) -> requests.Response:
     if not response.ok:
         try:
@@ -32,8 +29,8 @@ def check(response: requests.Response, action: str) -> requests.Response:
             f"{action} failed with HTTP {response.status_code}: {detail}"
         )
     return response
-
-
+ 
+ 
 def latest_record_id(session: requests.Session, concept_id: str) -> int:
     response = check(
         session.get(
@@ -54,32 +51,44 @@ def latest_record_id(session: requests.Session, concept_id: str) -> int:
             f"No published record was found for concept ID {concept_id}."
         )
     return max(int(hit["id"]) for hit in hits)
-
-
-def create_or_reuse_draft(
+ 
+ 
+def find_existing_draft(
     session: requests.Session,
-    latest_id: int,
-) -> dict[str, Any]:
-    latest = check(
+    concept_id: str,
+) -> dict[str, Any] | None:
+    """Return an unsubmitted draft for this concept owned by the token's
+    account, or None. This is more reliable than the ``latest_draft`` link
+    on the published record, which is not always present (e.g. when a stale
+    draft was created against a different deposition in an earlier run)."""
+    response = check(
         session.get(
-            f"{API_BASE}/deposit/depositions/{latest_id}",
+            f"{API_BASE}/deposit/depositions",
+            params={
+                "q": f"conceptrecid:{concept_id}",
+                "all_versions": "true",
+                "size": 100,
+            },
             timeout=TIMEOUT,
         ),
-        "Opening the latest published Zenodo record",
-    ).json()
-
-    latest_draft_url = latest.get("links", {}).get("latest_draft")
-
-    if latest_draft_url:
-        candidate = check(
-            session.get(latest_draft_url, timeout=TIMEOUT),
-            "Checking for an existing new-version draft",
-        ).json()
-
-        if not candidate.get("submitted", False):
-            print(f"Reusing existing Zenodo draft: {candidate['id']}")
-            return candidate
-
+        "Listing depositions for this concept",
+    )
+    for deposition in response.json():
+        if not deposition.get("submitted", False):
+            return deposition
+    return None
+ 
+ 
+def create_or_reuse_draft(
+    session: requests.Session,
+    concept_id: str,
+    latest_id: int,
+) -> dict[str, Any]:
+    existing = find_existing_draft(session, concept_id)
+    if existing is not None:
+        print(f"Reusing existing Zenodo draft: {existing['id']}")
+        return existing
+ 
     response = check(
         session.post(
             f"{API_BASE}/deposit/depositions/{latest_id}/actions/newversion",
@@ -87,16 +96,17 @@ def create_or_reuse_draft(
         ),
         "Creating the new Zenodo version",
     )
-
+ 
     latest_draft_url = response.json().get("links", {}).get("latest_draft")
     if not latest_draft_url:
         raise RuntimeError("Zenodo did not return a latest_draft link.")
-
+ 
     return check(
         session.get(latest_draft_url, timeout=TIMEOUT),
         "Opening the new-version draft",
     ).json()
-
+ 
+ 
 def replace_files(
     session: requests.Session,
     draft: dict[str, Any],
@@ -104,12 +114,12 @@ def replace_files(
 ) -> None:
     draft_id = int(draft["id"])
     files_url = draft["links"]["files"]
-
+ 
     existing_files = check(
         session.get(files_url, timeout=TIMEOUT),
         "Listing inherited Zenodo files",
     ).json()
-
+ 
     for item in existing_files:
         file_id = item["id"]
         check(
@@ -119,12 +129,12 @@ def replace_files(
             ),
             f"Deleting inherited file {item.get('filename', file_id)}",
         )
-
+ 
     bucket_url = draft["links"]["bucket"].rstrip("/")
     for path in paths:
         if not path.is_file():
             raise FileNotFoundError(f"Release file not found: {path}")
-
+ 
         with path.open("rb") as handle:
             check(
                 session.put(
@@ -134,8 +144,8 @@ def replace_files(
                 ),
                 f"Uploading {path}",
             )
-
-
+ 
+ 
 def update_metadata(
     session: requests.Session,
     draft: dict[str, Any],
@@ -144,26 +154,26 @@ def update_metadata(
     publication_date: str,
 ) -> dict[str, Any]:
     metadata = dict(draft["metadata"])
-
+ 
     # Remove an optional inherited field that may be incompatible
     # with the legacy Zenodo deposition API.
     metadata.pop("dates", None)
-
+ 
     metadata["version"] = version
     metadata["publication_date"] = publication_date
-
+ 
     related = list(metadata.get("related_identifiers", []))
     relation = {
         "identifier": release_url,
         "relation": "isSupplementedBy",
         "resource_type": "other",
     }
-
+ 
     if not any(item.get("identifier") == release_url for item in related):
         related.append(relation)
-
+ 
     metadata["related_identifiers"] = related
-
+ 
     return check(
         session.put(
             draft["links"]["self"],
@@ -172,32 +182,33 @@ def update_metadata(
         ),
         "Updating Zenodo metadata",
     ).json()
-
+ 
+ 
 def main() -> None:
     token = require_env("ZENODO_SANDBOX_TOKEN")
     concept_id = require_env("ZENODO_SANDBOX_CONCEPT_ID")
     tag = require_env("GITHUB_RELEASE_TAG")
     release_url = require_env("GITHUB_RELEASE_URL")
     published_at = os.environ.get("GITHUB_RELEASE_PUBLISHED_AT", "").strip()
-
+ 
     version = tag[1:] if tag.lower().startswith("v") else tag
     publication_date = (
         published_at[:10] if published_at else date.today().isoformat()
     )
-
+ 
     if len(sys.argv) < 2:
         raise RuntimeError("Pass at least one repository file to upload.")
     paths = [Path(arg) for arg in sys.argv[1:]]
-
+ 
     session = requests.Session()
     session.headers.update({"Authorization": f"Bearer {token}"})
-
+ 
     latest_id = latest_record_id(session, concept_id)
     print(f"Latest published Zenodo record: {latest_id}")
-
-    draft = create_or_reuse_draft(session, latest_id)
+ 
+    draft = create_or_reuse_draft(session, concept_id, latest_id)
     print(f"New-version draft: {draft['id']}")
-
+ 
     replace_files(session, draft, paths)
     draft = update_metadata(
         session,
@@ -206,12 +217,12 @@ def main() -> None:
         release_url,
         publication_date,
     )
-
+ 
     published = check(
         session.post(draft["links"]["publish"], timeout=TIMEOUT),
         "Publishing the Zenodo version",
     ).json()
-
+ 
     doi = published.get("doi") or published.get("metadata", {}).get(
         "prereserve_doi", {}
     ).get("doi")
@@ -219,11 +230,12 @@ def main() -> None:
         f"Published Zenodo version {version}. "
         f"DOI: {doi or 'see Zenodo record'}"
     )
-
-
+ 
+ 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        raise
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+ 
