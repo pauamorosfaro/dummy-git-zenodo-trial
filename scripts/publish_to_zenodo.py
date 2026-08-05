@@ -87,7 +87,15 @@ def create_or_reuse_draft(
     existing = find_existing_draft(session, concept_id)
     if existing is not None:
         print(f"Reusing existing Zenodo draft: {existing['id']}")
-        return existing
+        # The list endpoint returns an abbreviated representation that may
+        # lack links such as "bucket"; fetch the full deposition instead.
+        return check(
+            session.get(
+                f"{API_BASE}/deposit/depositions/{existing['id']}",
+                timeout=TIMEOUT,
+            ),
+            "Opening the existing Zenodo draft",
+        ).json()
  
     response = check(
         session.post(
@@ -130,20 +138,33 @@ def replace_files(
             f"Deleting inherited file {item.get('filename', file_id)}",
         )
  
-    bucket_url = draft["links"]["bucket"].rstrip("/")
+    bucket_url = draft.get("links", {}).get("bucket")
     for path in paths:
         if not path.is_file():
             raise FileNotFoundError(f"Release file not found: {path}")
  
-        with path.open("rb") as handle:
-            check(
-                session.put(
-                    f"{bucket_url}/{path.name}",
-                    data=handle,
-                    timeout=300,
-                ),
-                f"Uploading {path}",
-            )
+        if bucket_url:
+            with path.open("rb") as handle:
+                check(
+                    session.put(
+                        f"{bucket_url.rstrip('/')}/{path.name}",
+                        data=handle,
+                        timeout=300,
+                    ),
+                    f"Uploading {path}",
+                )
+        else:
+            # Fall back to the legacy files API if no bucket link exists.
+            with path.open("rb") as handle:
+                check(
+                    session.post(
+                        f"{API_BASE}/deposit/depositions/{draft_id}/files",
+                        data={"name": path.name},
+                        files={"file": handle},
+                        timeout=300,
+                    ),
+                    f"Uploading {path}",
+                )
  
  
 def update_metadata(
@@ -238,4 +259,3 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
- 
