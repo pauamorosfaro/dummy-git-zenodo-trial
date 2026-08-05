@@ -2,6 +2,10 @@
 
 All notable changes to this dummy dataset are recorded here.
 
+## [0.3.0] - 2026-08-05
+
+- Added a 17th row to every numerical sequence.
+
 ## [0.2.0] - 2026-08-05
 
 - Added a 16th row to every numerical sequence.
