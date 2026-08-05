@@ -123,9 +123,13 @@ def update_metadata(
     release_url: str,
     publication_date: str,
 ) -> dict[str, Any]:
-    metadata = dict(draft["metadata"])
-    metadata["version"] = version
-    metadata["publication_date"] = publication_date
+metadata = dict(draft["metadata"])
+
+# Remove an optional inherited field that can be incompatible
+# with the legacy Zenodo deposition API.
+metadata.pop("dates", None)
+
+metadata["version"] = version    metadata["publication_date"] = publication_date
 
     related = list(metadata.get("related_identifiers", []))
     relation = {
