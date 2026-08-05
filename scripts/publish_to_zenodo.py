@@ -60,6 +60,26 @@ def create_or_reuse_draft(
     session: requests.Session,
     latest_id: int,
 ) -> dict[str, Any]:
+    latest = check(
+        session.get(
+            f"{API_BASE}/deposit/depositions/{latest_id}",
+            timeout=TIMEOUT,
+        ),
+        "Opening the latest published Zenodo record",
+    ).json()
+
+    latest_draft_url = latest.get("links", {}).get("latest_draft")
+
+    if latest_draft_url:
+        candidate = check(
+            session.get(latest_draft_url, timeout=TIMEOUT),
+            "Checking for an existing new-version draft",
+        ).json()
+
+        if not candidate.get("submitted", False):
+            print(f"Reusing existing Zenodo draft: {candidate['id']}")
+            return candidate
+
     response = check(
         session.post(
             f"{API_BASE}/deposit/depositions/{latest_id}/actions/newversion",
@@ -67,6 +87,7 @@ def create_or_reuse_draft(
         ),
         "Creating the new Zenodo version",
     )
+
     latest_draft_url = response.json().get("links", {}).get("latest_draft")
     if not latest_draft_url:
         raise RuntimeError("Zenodo did not return a latest_draft link.")
@@ -75,7 +96,6 @@ def create_or_reuse_draft(
         session.get(latest_draft_url, timeout=TIMEOUT),
         "Opening the new-version draft",
     ).json()
-
 
 def replace_files(
     session: requests.Session,
