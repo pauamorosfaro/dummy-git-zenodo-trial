@@ -1,0 +1,43 @@
+name: Publish dataset to Zenodo Sandbox
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenodo-sandbox-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the released version
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests
+
+      - name: Publish dataset version to Zenodo Sandbox
+        env:
+          ZENODO_SANDBOX_TOKEN: ${{ secrets.ZENODO_SANDBOX_TOKEN }}
+          ZENODO_SANDBOX_CONCEPT_ID: ${{ vars.ZENODO_SANDBOX_CONCEPT_ID }}
+          GITHUB_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_RELEASE_URL: ${{ github.event.release.html_url }}
+          GITHUB_RELEASE_PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: |
+          python scripts/publish_to_zenodo.py \
+            data/dummy_number_sequences.csv \
+            README.md \
+            CHANGELOG.md
