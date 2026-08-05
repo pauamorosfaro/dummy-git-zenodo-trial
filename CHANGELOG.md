@@ -2,6 +2,11 @@
 
 All notable changes to this dummy dataset are recorded here.
 
+## [0.4.0] - 2026-08-05
+
+- Added an 18th row to every numerical sequence.
+- First version intended for automatic Zenodo Sandbox publication.
+
 ## [0.3.0] - 2026-08-05
 
 - Added a 17th row to every numerical sequence.
